@@ -17,6 +17,8 @@ export class SessionManager implements vscode.Disposable {
   private store: SessionStore;
   private listeners: SessionChangeListener[] = [];
   private disposables: vscode.Disposable[] = [];
+  private recoveryTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly RECOVERY_INTERVAL_MS = 30000; // save recovery every 30s
 
   constructor(eventCollector: EventCollector, gitWatcher: GitWatcher, idleDetector: IdleDetector, breakpointDetector: BreakpointDetector, store: SessionStore) {
     this.eventCollector = eventCollector;
@@ -62,6 +64,7 @@ export class SessionManager implements vscode.Disposable {
     this.eventCollector.start();
     await this.gitWatcher.start();
     this.idleDetector.start();
+    this.startRecoveryTimer();
     this.notifyListeners();
 
     console.log(`CodingJournal: Session started — ${workspace} (${branch ?? 'no branch'})`);
@@ -82,6 +85,8 @@ export class SessionManager implements vscode.Disposable {
     const filePath = await this.store.save(this.session);
     const savedSession = this.session;
     this.session = null;
+    this.stopRecoveryTimer();
+    await this.store.clearRecovery();
     this.notifyListeners();
 
     console.log(`CodingJournal: Session ended — ${savedSession.workspace}`);
@@ -132,6 +137,48 @@ export class SessionManager implements vscode.Disposable {
     }
   }
 
+  /** Check for a crashed session and offer to resume it. */
+  async checkForRecovery(): Promise<boolean> {
+    const recovered = await this.store.loadRecovery();
+    if (!recovered || recovered.endTime) { return false; }
+
+    const choice = await vscode.window.showInformationMessage(
+      `CodingJournal: Found an interrupted session from ${new Date(recovered.startTime).toLocaleString()}. Resume it?`,
+      'Resume',
+      'Discard',
+    );
+
+    if (choice === 'Resume') {
+      this.session = recovered;
+      this.eventCollector.start();
+      await this.gitWatcher.start();
+      this.idleDetector.start();
+      this.startRecoveryTimer();
+      this.notifyListeners();
+      console.log('CodingJournal: Resumed recovered session');
+      return true;
+    } else {
+      await this.store.clearRecovery();
+      return false;
+    }
+  }
+
+  private startRecoveryTimer(): void {
+    this.stopRecoveryTimer();
+    this.recoveryTimer = setInterval(() => {
+      if (this.session) {
+        this.store.saveRecovery(this.session).catch(() => {});
+      }
+    }, this.RECOVERY_INTERVAL_MS);
+  }
+
+  private stopRecoveryTimer(): void {
+    if (this.recoveryTimer) {
+      clearInterval(this.recoveryTimer);
+      this.recoveryTimer = null;
+    }
+  }
+
   private getWorkspaceName(): string {
     const folders = vscode.workspace.workspaceFolders;
     if (folders && folders.length > 0) {
@@ -160,6 +207,7 @@ export class SessionManager implements vscode.Disposable {
   }
 
   dispose(): void {
+    this.stopRecoveryTimer();
     for (const d of this.disposables) {
       d.dispose();
     }

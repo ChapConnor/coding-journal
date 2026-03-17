@@ -7,10 +7,32 @@ import { SessionManager } from './session/SessionManager';
 import { SessionStore } from './storage/SessionStore';
 import { JournalPrompt } from './ui/JournalPrompt';
 import { StatusBar } from './ui/StatusBar';
-import { PromptContext } from './types';
+import { TimelinePanel } from './ui/TimelinePanel';
+import { MarkdownExporter } from './export/MarkdownExporter';
+import { ObsidianExporter } from './export/ObsidianExporter';
+import { PromptContext, Session } from './types';
 
 let sessionManager: SessionManager | undefined;
 let journalPrompt: JournalPrompt | undefined;
+
+async function exportSession(session: Session, md: MarkdownExporter, obs: ObsidianExporter): Promise<string | null> {
+  const format = vscode.workspace.getConfiguration('codingJournal').get<string>('exportFormat', 'markdown');
+  try {
+    if (format === 'obsidian') {
+      const filePath = await obs.export(session);
+      vscode.window.showInformationMessage(`CodingJournal: Exported to Obsidian \u2014 ${filePath}`);
+      return filePath;
+    } else {
+      const filePath = await md.export(session);
+      vscode.window.showInformationMessage(`CodingJournal: Exported to ${filePath}`);
+      return filePath;
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    vscode.window.showErrorMessage(`CodingJournal: Export failed \u2014 ${msg}`);
+    return null;
+  }
+}
 
 async function handlePrompt(ctx: PromptContext, mgr: SessionManager, prompt: JournalPrompt): Promise<void> {
   const result = await prompt.show(ctx);
@@ -30,10 +52,16 @@ export function activate(context: vscode.ExtensionContext) {
   const store = new SessionStore();
   journalPrompt = new JournalPrompt();
   const statusBar = new StatusBar();
+  const timelinePanel = new TimelinePanel(context.extensionPath);
+  const markdownExporter = new MarkdownExporter();
+  const obsidianExporter = new ObsidianExporter(markdownExporter);
   sessionManager = new SessionManager(eventCollector, gitWatcher, idleDetector, breakpointDetector, store);
 
-  // Keep status bar in sync with session state
-  sessionManager.onChange((session) => statusBar.update(session));
+  // Keep status bar and timeline in sync with session state
+  sessionManager.onChange((session) => {
+    statusBar.update(session);
+    timelinePanel.update(session);
+  });
 
   context.subscriptions.push(eventCollector);
   context.subscriptions.push(gitWatcher);
@@ -41,6 +69,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(breakpointDetector);
   context.subscriptions.push(journalPrompt);
   context.subscriptions.push(statusBar);
+  context.subscriptions.push(timelinePanel);
   context.subscriptions.push(sessionManager);
 
   // When a breakpoint fires, show the contextual prompt
@@ -51,11 +80,31 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  // Auto-start session if configured
-  const config = vscode.workspace.getConfiguration('codingJournal');
-  if (config.get<boolean>('autoStart', true)) {
-    sessionManager.startSession();
-  }
+  // Check for crashed session, then auto-start if configured
+  const sm = sessionManager;
+  (async () => {
+    const resumed = await sm.checkForRecovery();
+    if (!resumed) {
+      const config = vscode.workspace.getConfiguration('codingJournal');
+      if (config.get<boolean>('autoStart', true)) {
+        await sm.startSession();
+      }
+    }
+  })();
+
+  // React to config changes that affect status bar display
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('codingJournal')) {
+        // StatusBar and other components read config on each use,
+        // so just trigger a refresh
+        const session = sm.getSession();
+        if (session) {
+          statusBar.update(session);
+        }
+      }
+    })
+  );
 
   // Commands
   context.subscriptions.push(
@@ -86,6 +135,12 @@ export function activate(context: vscode.ExtensionContext) {
       const ctx = breakpointDetector.fireSessionEnd();
       await handlePrompt(ctx, sessionManager, jp);
 
+      // Export before ending (session data is still available)
+      const session = sessionManager.getSession();
+      if (session) {
+        await exportSession(session, markdownExporter, obsidianExporter);
+      }
+
       const filePath = await sessionManager.endSession();
       if (filePath) {
         vscode.window.showInformationMessage(`CodingJournal: Session saved to ${filePath}`);
@@ -93,11 +148,25 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('codingJournal.openTimeline', () => {
-      vscode.window.showInformationMessage('CodingJournal: Timeline (not yet implemented)');
+      const session = sessionManager?.getSession();
+      if (!session) {
+        vscode.window.showWarningMessage('CodingJournal: No active session.');
+        return;
+      }
+      timelinePanel.show(session);
     }),
 
-    vscode.commands.registerCommand('codingJournal.exportSession', () => {
-      vscode.window.showInformationMessage('CodingJournal: Export (not yet implemented)');
+    vscode.commands.registerCommand('codingJournal.exportSession', async () => {
+      const session = sessionManager?.getSession();
+      if (!session) {
+        vscode.window.showWarningMessage('CodingJournal: No active session to export.');
+        return;
+      }
+      const exportPath = await exportSession(session, markdownExporter, obsidianExporter);
+      if (exportPath) {
+        const doc = await vscode.workspace.openTextDocument(exportPath);
+        await vscode.window.showTextDocument(doc, { preview: true });
+      }
     }),
 
     vscode.commands.registerCommand('codingJournal.viewPastSessions', async () => {

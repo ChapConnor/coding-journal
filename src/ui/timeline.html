@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-{{nonce}}';">
+  <style>
+    :root {
+      --note-bg: var(--vscode-editor-inactiveSelectionBackground, rgba(255, 255, 200, 0.08));
+      --commit-border: var(--vscode-gitDecoration-addedResourceForeground, #73c991);
+      --idle-color: var(--vscode-descriptionForeground, #888);
+      --debug-color: var(--vscode-editorWarning-foreground, #cca700);
+      --separator: var(--vscode-widget-border, rgba(128,128,128,0.2));
+    }
+
+    body {
+      font-family: var(--vscode-font-family, monospace);
+      font-size: var(--vscode-font-size, 13px);
+      color: var(--vscode-foreground);
+      background: var(--vscode-editor-background);
+      padding: 12px 16px;
+      margin: 0;
+    }
+
+    .header {
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--separator);
+    }
+
+    .header h2 {
+      margin: 0 0 4px 0;
+      font-size: 1.1em;
+      font-weight: 600;
+    }
+
+    .header .meta {
+      font-size: 0.9em;
+      color: var(--idle-color);
+    }
+
+    .timeline {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .event {
+      display: flex;
+      gap: 10px;
+      padding: 4px 8px;
+      border-radius: 3px;
+      margin-bottom: 2px;
+      align-items: baseline;
+    }
+
+    .event .time {
+      flex-shrink: 0;
+      width: 42px;
+      font-size: 0.85em;
+      color: var(--idle-color);
+      font-family: monospace;
+    }
+
+    .event .icon {
+      flex-shrink: 0;
+      width: 18px;
+      text-align: center;
+    }
+
+    .event .body {
+      flex: 1;
+      min-width: 0;
+    }
+
+    /* Auto events: compact, muted */
+    .event.auto {
+      opacity: 0.75;
+      font-size: 0.92em;
+    }
+
+    /* Notes: visually weighted */
+    .event.note {
+      background: var(--note-bg);
+      opacity: 1;
+      padding: 6px 8px;
+      margin: 4px 0;
+      border-radius: 4px;
+    }
+
+    .event.note .body {
+      font-style: italic;
+    }
+
+    /* Commits: green left border */
+    .event.commit {
+      border-left: 3px solid var(--commit-border);
+      padding-left: 6px;
+      opacity: 1;
+    }
+
+    /* Idle: lower visual weight */
+    .event.idle {
+      color: var(--idle-color);
+    }
+
+    /* Debug: amber */
+    .event.debug {
+      color: var(--debug-color);
+    }
+
+    .diff-stat {
+      font-size: 0.85em;
+      color: var(--idle-color);
+    }
+
+    .footer {
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid var(--separator);
+      display: flex;
+      gap: 8px;
+    }
+
+    .footer button {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border: none;
+      padding: 6px 14px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 0.9em;
+    }
+
+    .footer button:hover {
+      background: var(--vscode-button-hoverBackground);
+    }
+
+    .footer button.secondary {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+
+    .empty {
+      text-align: center;
+      color: var(--idle-color);
+      padding: 32px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h2 id="title">Coding Session</h2>
+    <div class="meta" id="meta"></div>
+  </div>
+
+  <ul class="timeline" id="timeline">
+    <li class="empty" id="empty-msg">No events yet. Start coding!</li>
+  </ul>
+
+  <div class="footer">
+    <button id="btn-note" title="Add a note (Cmd+Shift+J)">+ Add Note</button>
+    <button id="btn-end" class="secondary">End Session</button>
+  </div>
+
+  <script nonce="{{nonce}}">
+    const vscode = acquireVsCodeApi();
+    const timeline = document.getElementById('timeline');
+    const emptyMsg = document.getElementById('empty-msg');
+    const titleEl = document.getElementById('title');
+    const metaEl = document.getElementById('meta');
+
+    // Track rendered event IDs to avoid duplicates
+    const renderedIds = new Set();
+
+    document.getElementById('btn-note').addEventListener('click', () => {
+      vscode.postMessage({ command: 'addNote' });
+    });
+
+    document.getElementById('btn-end').addEventListener('click', () => {
+      vscode.postMessage({ command: 'endSession' });
+    });
+
+    window.addEventListener('message', (msg) => {
+      const data = msg.data;
+      if (data.command === 'update') {
+        renderSession(data.session);
+      }
+    });
+
+    function renderSession(session) {
+      // Update header
+      const start = new Date(session.startTime);
+      const elapsed = formatDuration(start);
+      titleEl.textContent = 'Coding Session \u2014 ' + session.workspace;
+
+      const commits = session.events.filter(e => e.type === 'git_commit').length;
+      const notes = session.events.filter(e => e.type === 'note').length;
+      const branch = session.branch ? ' \u00B7 ' + session.branch : '';
+      metaEl.textContent = elapsed + branch + ' \u00B7 ' + commits + ' commit' + (commits !== 1 ? 's' : '') + ' \u00B7 ' + notes + ' note' + (notes !== 1 ? 's' : '');
+
+      // Render new events
+      for (const event of session.events) {
+        if (renderedIds.has(event.id)) continue;
+        renderedIds.add(event.id);
+
+        const el = renderEvent(event);
+        if (el) {
+          if (emptyMsg && emptyMsg.parentNode) {
+            emptyMsg.remove();
+          }
+          timeline.appendChild(el);
+          el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      }
+    }
+
+    function renderEvent(event) {
+      const time = formatTime(event.timestamp);
+
+      let cssClass = 'auto';
+      let icon = '';
+      let body = '';
+
+      switch (event.type) {
+        case 'session_start':
+          icon = '\u25B6';
+          body = 'Session started';
+          break;
+
+        case 'session_end':
+          icon = '\u23F9';
+          body = 'Session ended';
+          break;
+
+        case 'edit_block': {
+          icon = '\u270F\uFE0F';
+          const file = shortenPath(event.data.filePath || '');
+          const dur = (event.data.durationMin || 0);
+          const saves = event.data.saveCount || 0;
+          body = file + ' \u00B7 ' + formatMin(dur) + ' \u00B7 ' + saves + ' save' + (saves !== 1 ? 's' : '');
+          break;
+        }
+
+        case 'git_commit': {
+          cssClass = 'commit';
+          icon = '\u2705';
+          const added = event.data.linesAdded || 0;
+          const removed = event.data.linesRemoved || 0;
+          body = (event.data.commitMessage || '') + ' <span class="diff-stat">(+' + added + ' \u2212' + removed + ')</span>';
+          break;
+        }
+
+        case 'idle_start':
+          cssClass = 'idle';
+          icon = '\u23F8';
+          body = 'Idle';
+          break;
+
+        case 'idle_end': {
+          cssClass = 'idle';
+          icon = '\u23F8';
+          const dur = event.data.idleDurationMin || 0;
+          const label = event.data.idleType === 'long' ? 'Long idle' : 'Idle';
+          body = label + ' \u00B7 ' + formatMin(dur);
+          break;
+        }
+
+        case 'debug_start':
+          cssClass = 'debug';
+          icon = '\uD83D\uDC1E';
+          body = 'Debug started (' + (event.data.debugType || 'unknown') + ')';
+          break;
+
+        case 'debug_end': {
+          cssClass = 'debug';
+          icon = '\uD83D\uDC1E';
+          const dur = event.data.debugDurationMin || 0;
+          body = 'Debug ended (' + (event.data.debugType || 'unknown') + ') \u00B7 ' + formatMin(dur);
+          break;
+        }
+
+        case 'note':
+          cssClass = 'note';
+          icon = '\uD83D\uDCDD';
+          body = '"' + escapeHtml(event.data.noteText || '') + '"';
+          break;
+
+        case 'terminal_open':
+          icon = '\u276F';
+          body = 'Terminal opened';
+          break;
+
+        default:
+          return null;
+      }
+
+      const li = document.createElement('li');
+      li.className = 'event ' + cssClass;
+      li.innerHTML = '<span class="time">' + time + '</span>' +
+        '<span class="icon">' + icon + '</span>' +
+        '<span class="body">' + body + '</span>';
+      return li;
+    }
+
+    function formatTime(iso) {
+      const d = new Date(iso);
+      return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    }
+
+    function formatMin(m) {
+      if (m < 1) return '<1m';
+      if (m < 60) return Math.round(m) + 'm';
+      const h = Math.floor(m / 60);
+      const r = Math.round(m % 60);
+      return r > 0 ? h + 'h ' + r + 'm' : h + 'h';
+    }
+
+    function formatDuration(start) {
+      const ms = Date.now() - start.getTime();
+      const min = Math.floor(ms / 60000);
+      if (min < 60) return min + 'm';
+      return Math.floor(min / 60) + 'h ' + (min % 60) + 'm';
+    }
+
+    function shortenPath(p) {
+      const parts = p.replace(/\\\\/g, '/').split('/');
+      if (parts.length <= 2) return p;
+      return parts.slice(-2).join('/');
+    }
+
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>

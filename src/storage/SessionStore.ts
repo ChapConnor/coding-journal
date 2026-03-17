@@ -49,6 +49,35 @@ export class SessionStore {
     return this.storagePath;
   }
 
+  /** Save an in-progress session for crash recovery. */
+  async saveRecovery(session: Session): Promise<string> {
+    await this.ensureDir(this.storagePath);
+    const filePath = path.join(this.storagePath, '_recovery.json');
+    await fs.promises.writeFile(filePath, JSON.stringify(session, null, 2), 'utf-8');
+    return filePath;
+  }
+
+  /** Load a crashed session if one exists. */
+  async loadRecovery(): Promise<Session | null> {
+    const filePath = path.join(this.storagePath, '_recovery.json');
+    try {
+      const raw = await fs.promises.readFile(filePath, 'utf-8');
+      return JSON.parse(raw) as Session;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Remove the recovery file after a clean session end. */
+  async clearRecovery(): Promise<void> {
+    const filePath = path.join(this.storagePath, '_recovery.json');
+    try {
+      await fs.promises.unlink(filePath);
+    } catch {
+      // Already gone — fine
+    }
+  }
+
   private buildFileName(session: Session): string {
     // Format: YYYY-MM-DD_HH-MM-SS_{workspace}.json
     const date = new Date(session.startTime);
