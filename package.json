@@ -1,0 +1,151 @@
+{
+  "name": "coding-journal",
+  "displayName": "CodingJournal",
+  "description": "Capture what you were thinking while you code. Interstitial journaling for developers.",
+  "version": "0.0.1",
+  "publisher": "codingjournal",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "codingJournal.addNote",
+        "title": "CodingJournal: Add Note"
+      },
+      {
+        "command": "codingJournal.startSession",
+        "title": "CodingJournal: Start Session"
+      },
+      {
+        "command": "codingJournal.endSession",
+        "title": "CodingJournal: End Session"
+      },
+      {
+        "command": "codingJournal.openTimeline",
+        "title": "CodingJournal: Open Timeline"
+      },
+      {
+        "command": "codingJournal.exportSession",
+        "title": "CodingJournal: Export Session"
+      },
+      {
+        "command": "codingJournal.viewPastSessions",
+        "title": "CodingJournal: View Past Sessions"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "codingJournal.addNote",
+        "key": "cmd+shift+j",
+        "mac": "cmd+shift+j",
+        "win": "ctrl+shift+j",
+        "linux": "ctrl+shift+j"
+      }
+    ],
+    "configuration": {
+      "title": "CodingJournal",
+      "properties": {
+        "codingJournal.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start a session when VS Code opens."
+        },
+        "codingJournal.idleThresholdMinutes": {
+          "type": "number",
+          "default": 5,
+          "description": "Minutes of inactivity before a short idle is detected."
+        },
+        "codingJournal.longIdleThresholdMinutes": {
+          "type": "number",
+          "default": 15,
+          "description": "Minutes of inactivity before a long idle is detected."
+        },
+        "codingJournal.promptAutoDismissSeconds": {
+          "type": "number",
+          "default": 60,
+          "description": "Seconds before a journal prompt auto-dismisses."
+        },
+        "codingJournal.promptOnCommit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Prompt for a note after a git commit."
+        },
+        "codingJournal.promptOnIdleEnd": {
+          "type": "boolean",
+          "default": true,
+          "description": "Prompt for a note when editing resumes after idle."
+        },
+        "codingJournal.promptOnDebugEnd": {
+          "type": "boolean",
+          "default": true,
+          "description": "Prompt for a note when a debug session ends."
+        },
+        "codingJournal.promptOnPreCommit": {
+          "type": "boolean",
+          "default": false,
+          "description": "Prompt for a note when the staging area becomes non-empty."
+        },
+        "codingJournal.promptOnContextSwitch": {
+          "type": "boolean",
+          "default": false,
+          "description": "Prompt for a note when switching to a different folder."
+        },
+        "codingJournal.exportFormat": {
+          "type": "string",
+          "default": "markdown",
+          "enum": [
+            "markdown",
+            "obsidian"
+          ],
+          "description": "Default export format."
+        },
+        "codingJournal.obsidianVaultPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to your Obsidian vault."
+        },
+        "codingJournal.obsidianMode": {
+          "type": "string",
+          "default": "daily-note",
+          "enum": [
+            "standalone",
+            "daily-note"
+          ],
+          "description": "How to write to Obsidian: standalone file or append to daily note."
+        },
+        "codingJournal.sessionStoragePath": {
+          "type": "string",
+          "default": "~/.codingjournals/sessions",
+          "description": "Where session JSON files are stored."
+        },
+        "codingJournal.exportPath": {
+          "type": "string",
+          "default": "~/.codingjournals/exports",
+          "description": "Where exported session files are written."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3"
+  }
+}
