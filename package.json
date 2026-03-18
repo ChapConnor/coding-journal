@@ -39,6 +39,14 @@
       {
         "command": "codingJournal.viewPastSessions",
         "title": "CodingJournal: View Past Sessions"
+      },
+      {
+        "command": "codingJournal.connectTwitter",
+        "title": "CodingJournal: Connect X/Twitter"
+      },
+      {
+        "command": "codingJournal.disconnectTwitter",
+        "title": "CodingJournal: Disconnect X/Twitter"
       }
     ],
     "keybindings": [
@@ -68,12 +76,7 @@
           "default": 15,
           "description": "Minutes of inactivity before a long idle is detected."
         },
-        "codingJournal.promptAutoDismissSeconds": {
-          "type": "number",
-          "default": 60,
-          "description": "Seconds before a journal prompt auto-dismisses."
-        },
-        "codingJournal.promptOnCommit": {
+"codingJournal.promptOnCommit": {
           "type": "boolean",
           "default": true,
           "description": "Prompt for a note after a git commit."
@@ -130,13 +133,23 @@
           "type": "string",
           "default": "~/.codingjournals/exports",
           "description": "Where exported session files are written."
+        },
+        "codingJournal.twitterAutoShare": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically share a session summary on X/Twitter when a session ends."
+        },
+        "codingJournal.twitterTemplate": {
+          "type": "string",
+          "default": "",
+          "description": "Custom tweet template. Use {workspace}, {branch}, {duration}, {commits}, {notes}, {linesAdded}, {linesRemoved}. Leave empty for default format."
         }
       }
     }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
+    "compile": "tsc -p ./ && mkdir -p out/ui && cp src/ui/timeline.html out/ui/timeline.html",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
     "test": "vitest run",

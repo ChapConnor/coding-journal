@@ -104,31 +104,26 @@ export class GitWatcher implements vscode.Disposable {
 
   private async getCommitInfo(hash: string): Promise<CommitInfo | null> {
     try {
-      // Get hash, message, and timestamp
-      const logResult = await this.git(`log -1 --format="%H|%s|%aI" ${hash}`);
-      const [commitHash, message, timestamp] = logResult.trim().split('|');
+      // Use ASCII record separator (0x1e) as delimiter to avoid conflicts with commit message content
+      const SEP = '\x1e';
+      const logResult = await this.git(`log -1 --format=%H${SEP}%s${SEP}%aI ${hash}`);
+      const parts = logResult.trim().split(SEP);
+      const commitHash = parts[0];
+      const timestamp = parts[parts.length - 1];
+      // Message is everything between first and last separator (handles messages with any characters)
+      const message = parts.slice(1, -1).join(SEP);
 
       // Get diff stats
-      const statResult = await this.git(`diff --shortstat ${hash}~1 ${hash}`);
-      const { filesChanged, linesAdded, linesRemoved } = this.parseShortstat(statResult);
-
-      return {
-        hash: commitHash,
-        message,
-        timestamp,
-        filesChanged,
-        linesAdded,
-        linesRemoved,
-      };
-    } catch {
-      // Could be initial commit (no parent) — try without diff
       try {
-        const logResult = await this.git(`log -1 --format="%H|%s|%aI" ${hash}`);
-        const [commitHash, message, timestamp] = logResult.trim().split('|');
-        return { hash: commitHash, message, timestamp, filesChanged: 0, linesAdded: 0, linesRemoved: 0 };
+        const statResult = await this.git(`diff --shortstat ${hash}~1 ${hash}`);
+        const { filesChanged, linesAdded, linesRemoved } = this.parseShortstat(statResult);
+        return { hash: commitHash, message, timestamp, filesChanged, linesAdded, linesRemoved };
       } catch {
-        return null;
+        // Initial commit (no parent) — no diff stats available
+        return { hash: commitHash, message, timestamp, filesChanged: 0, linesAdded: 0, linesRemoved: 0 };
       }
+    } catch {
+      return null;
     }
   }
 

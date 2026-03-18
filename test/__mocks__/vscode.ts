@@ -68,6 +68,14 @@ export class Uri {
   }
 }
 
+export const env = {
+  openExternal: vi.fn(),
+};
+
+export const extensions = {
+  getExtension: vi.fn(() => null),
+};
+
 export class CancellationTokenSource {
   token = { isCancellationRequested: false, onCancellationRequested: vi.fn() };
   cancel = vi.fn();

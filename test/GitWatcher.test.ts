@@ -4,6 +4,8 @@ import { describe, it, expect } from 'vitest';
 // We can't easily test the full class (requires git + vscode), but we can
 // test the critical parsing functions that are most likely to break.
 
+const SEP = '\x1e'; // ASCII record separator — matches GitWatcher implementation
+
 describe('GitWatcher parsing', () => {
   // Replicate parseShortstat logic for isolated testing
   function parseShortstat(stat: string) {
@@ -17,9 +19,12 @@ describe('GitWatcher parsing', () => {
     };
   }
 
-  // Replicate commit log parsing
+  // Replicate commit log parsing (updated to use record separator)
   function parseCommitLog(logResult: string) {
-    const [commitHash, message, timestamp] = logResult.trim().split('|');
+    const parts = logResult.trim().split(SEP);
+    const commitHash = parts[0];
+    const timestamp = parts[parts.length - 1];
+    const message = parts.slice(1, -1).join(SEP);
     return { commitHash, message, timestamp };
   }
 
@@ -57,7 +62,7 @@ describe('GitWatcher parsing', () => {
 
   describe('parseCommitLog', () => {
     it('parses normal commit log', () => {
-      const result = parseCommitLog('abc123|Add new feature|2025-03-01T10:00:00+00:00\n');
+      const result = parseCommitLog(`abc123${SEP}Add new feature${SEP}2025-03-01T10:00:00+00:00\n`);
       expect(result).toEqual({
         commitHash: 'abc123',
         message: 'Add new feature',
@@ -65,19 +70,23 @@ describe('GitWatcher parsing', () => {
       });
     });
 
-    it('BUG: pipe in commit message corrupts parsing', () => {
-      // This documents the known bug — commit messages with | break parsing
-      const result = parseCommitLog('abc123|fix: handle x | y case|2025-03-01T10:00:00+00:00\n');
-      // The message gets truncated at the first pipe
-      expect(result.message).toBe('fix: handle x ');
-      // And the timestamp is wrong
-      expect(result.timestamp).not.toBe('2025-03-01T10:00:00+00:00');
+    it('handles pipe characters in commit message', () => {
+      // This was previously a bug — now fixed with record separator
+      const result = parseCommitLog(`abc123${SEP}fix: handle x | y case${SEP}2025-03-01T10:00:00+00:00\n`);
+      expect(result.commitHash).toBe('abc123');
+      expect(result.message).toBe('fix: handle x | y case');
+      expect(result.timestamp).toBe('2025-03-01T10:00:00+00:00');
     });
 
     it('handles empty commit message', () => {
-      const result = parseCommitLog('abc123||2025-03-01T10:00:00+00:00\n');
+      const result = parseCommitLog(`abc123${SEP}${SEP}2025-03-01T10:00:00+00:00\n`);
       expect(result.commitHash).toBe('abc123');
       expect(result.message).toBe('');
+    });
+
+    it('handles commit message with special characters', () => {
+      const result = parseCommitLog(`abc123${SEP}feat: add "quotes" & <angles>${SEP}2025-03-01T10:00:00+00:00\n`);
+      expect(result.message).toBe('feat: add "quotes" & <angles>');
     });
   });
 });

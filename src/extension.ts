@@ -10,6 +10,7 @@ import { StatusBar } from './ui/StatusBar';
 import { TimelinePanel } from './ui/TimelinePanel';
 import { MarkdownExporter } from './export/MarkdownExporter';
 import { ObsidianExporter } from './export/ObsidianExporter';
+import { TwitterService } from './share/TwitterService';
 import { PromptContext, Session } from './types';
 
 let sessionManager: SessionManager | undefined;
@@ -55,6 +56,7 @@ export function activate(context: vscode.ExtensionContext) {
   const timelinePanel = new TimelinePanel(context.extensionPath);
   const markdownExporter = new MarkdownExporter();
   const obsidianExporter = new ObsidianExporter(markdownExporter);
+  const twitterService = new TwitterService(context.secrets);
   sessionManager = new SessionManager(eventCollector, gitWatcher, idleDetector, breakpointDetector, store);
 
   // Keep status bar and timeline in sync with session state
@@ -71,6 +73,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(statusBar);
   context.subscriptions.push(timelinePanel);
   context.subscriptions.push(sessionManager);
+  context.subscriptions.push(twitterService);
 
   // When a breakpoint fires, show the contextual prompt
   const jp = journalPrompt;
@@ -135,10 +138,11 @@ export function activate(context: vscode.ExtensionContext) {
       const ctx = breakpointDetector.fireSessionEnd();
       await handlePrompt(ctx, sessionManager, jp);
 
-      // Export before ending (session data is still available)
+      // Export and auto-share before ending (session data is still available)
       const session = sessionManager.getSession();
       if (session) {
         await exportSession(session, markdownExporter, obsidianExporter);
+        await twitterService.shareSession(session);
       }
 
       const filePath = await sessionManager.endSession();
@@ -167,6 +171,49 @@ export function activate(context: vscode.ExtensionContext) {
         const doc = await vscode.workspace.openTextDocument(exportPath);
         await vscode.window.showTextDocument(doc, { preview: true });
       }
+    }),
+
+    vscode.commands.registerCommand('codingJournal.connectTwitter', async () => {
+      const apiKey = await vscode.window.showInputBox({
+        prompt: 'Twitter API Key (Consumer Key)',
+        ignoreFocusOut: true,
+      });
+      if (!apiKey) { return; }
+
+      const apiKeySecret = await vscode.window.showInputBox({
+        prompt: 'Twitter API Key Secret (Consumer Secret)',
+        ignoreFocusOut: true,
+        password: true,
+      });
+      if (!apiKeySecret) { return; }
+
+      const accessToken = await vscode.window.showInputBox({
+        prompt: 'Twitter Access Token',
+        ignoreFocusOut: true,
+      });
+      if (!accessToken) { return; }
+
+      const accessTokenSecret = await vscode.window.showInputBox({
+        prompt: 'Twitter Access Token Secret',
+        ignoreFocusOut: true,
+        password: true,
+      });
+      if (!accessTokenSecret) { return; }
+
+      await twitterService.setCredentials({ apiKey, apiKeySecret, accessToken, accessTokenSecret });
+
+      // Enable auto-share
+      const config = vscode.workspace.getConfiguration('codingJournal');
+      await config.update('twitterAutoShare', true, vscode.ConfigurationTarget.Global);
+
+      vscode.window.showInformationMessage('CodingJournal: X/Twitter connected! Sessions will auto-share when ended.');
+    }),
+
+    vscode.commands.registerCommand('codingJournal.disconnectTwitter', async () => {
+      await twitterService.clearCredentials();
+      const config = vscode.workspace.getConfiguration('codingJournal');
+      await config.update('twitterAutoShare', false, vscode.ConfigurationTarget.Global);
+      vscode.window.showInformationMessage('CodingJournal: X/Twitter disconnected.');
     }),
 
     vscode.commands.registerCommand('codingJournal.viewPastSessions', async () => {

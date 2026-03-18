@@ -23,7 +23,7 @@
     }
 
     .header {
-      margin-bottom: 16px;
+      margin-bottom: 12px;
       padding-bottom: 12px;
       border-bottom: 1px solid var(--separator);
     }
@@ -39,10 +39,56 @@
       color: var(--idle-color);
     }
 
+    /* View switcher */
+    .view-bar {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--separator);
+      flex-wrap: wrap;
+    }
+
+    .view-bar button {
+      background: transparent;
+      color: var(--idle-color);
+      border: 1px solid var(--separator);
+      padding: 3px 10px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 0.85em;
+      font-family: inherit;
+    }
+
+    .view-bar button:hover {
+      color: var(--vscode-foreground);
+      border-color: var(--vscode-foreground);
+    }
+
+    .view-bar button.active {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border-color: var(--vscode-button-background);
+    }
+
     .timeline {
       list-style: none;
       padding: 0;
       margin: 0;
+    }
+
+    /* Group headers (for grouped views) */
+    .group-header {
+      font-weight: 600;
+      font-size: 0.95em;
+      margin: 12px 0 4px 0;
+      padding: 4px 0;
+      border-bottom: 1px solid var(--separator);
+      color: var(--vscode-foreground);
+    }
+
+    .group-header:first-child {
+      margin-top: 0;
     }
 
     .event {
@@ -73,13 +119,11 @@
       min-width: 0;
     }
 
-    /* Auto events: compact, muted */
     .event.auto {
       opacity: 0.75;
       font-size: 0.92em;
     }
 
-    /* Notes: visually weighted */
     .event.note {
       background: var(--note-bg);
       opacity: 1;
@@ -90,21 +134,20 @@
 
     .event.note .body {
       font-style: italic;
+      white-space: pre-wrap;
+      word-break: break-word;
     }
 
-    /* Commits: green left border */
     .event.commit {
       border-left: 3px solid var(--commit-border);
       padding-left: 6px;
       opacity: 1;
     }
 
-    /* Idle: lower visual weight */
     .event.idle {
       color: var(--idle-color);
     }
 
-    /* Debug: amber */
     .event.debug {
       color: var(--debug-color);
     }
@@ -120,6 +163,7 @@
       border-top: 1px solid var(--separator);
       display: flex;
       gap: 8px;
+      flex-wrap: wrap;
     }
 
     .footer button {
@@ -154,12 +198,20 @@
     <div class="meta" id="meta"></div>
   </div>
 
+  <div class="view-bar">
+    <button class="active" data-view="chronological">Timeline</button>
+    <button data-view="type">By Type</button>
+    <button data-view="file">By File</button>
+    <button data-view="notes-only">Notes Only</button>
+  </div>
+
   <ul class="timeline" id="timeline">
     <li class="empty" id="empty-msg">No events yet. Start coding!</li>
   </ul>
 
   <div class="footer">
     <button id="btn-note" title="Add a note (Cmd+Shift+J)">+ Add Note</button>
+    <button id="btn-share" class="secondary" title="Share session summary on X/Twitter">Share on X</button>
     <button id="btn-end" class="secondary">End Session</button>
   </div>
 
@@ -170,8 +222,18 @@
     const titleEl = document.getElementById('title');
     const metaEl = document.getElementById('meta');
 
-    // Track rendered event IDs to avoid duplicates
-    const renderedIds = new Set();
+    let currentSession = null;
+    let currentView = 'chronological';
+
+    // View switcher
+    document.querySelectorAll('.view-bar button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.view-bar button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentView = btn.dataset.view;
+        if (currentSession) fullRender(currentSession);
+      });
+    });
 
     document.getElementById('btn-note').addEventListener('click', () => {
       vscode.postMessage({ command: 'addNote' });
@@ -181,15 +243,150 @@
       vscode.postMessage({ command: 'endSession' });
     });
 
+    document.getElementById('btn-share').addEventListener('click', () => {
+      vscode.postMessage({ command: 'shareOnX' });
+    });
+
     window.addEventListener('message', (msg) => {
       const data = msg.data;
       if (data.command === 'update') {
-        renderSession(data.session);
+        currentSession = data.session;
+        fullRender(data.session);
       }
     });
 
-    function renderSession(session) {
-      // Update header
+    function fullRender(session) {
+      updateHeader(session);
+      timeline.innerHTML = '';
+
+      const events = session.events.filter(e => e.type !== 'file_switch' && e.type !== 'git_stage');
+
+      if (events.length === 0) {
+        timeline.innerHTML = '<li class="empty">No events yet. Start coding!</li>';
+        return;
+      }
+
+      switch (currentView) {
+        case 'chronological':
+          renderChronological(events);
+          break;
+        case 'type':
+          renderByType(events);
+          break;
+        case 'file':
+          renderByFile(session.events);
+          break;
+        case 'notes-only':
+          renderNotesOnly(events);
+          break;
+      }
+    }
+
+    function renderChronological(events) {
+      for (const event of events) {
+        const el = renderEvent(event);
+        if (el) timeline.appendChild(el);
+      }
+      scrollToBottom();
+    }
+
+    function renderByType(events) {
+      const typeLabels = {
+        note: 'Notes',
+        git_commit: 'Commits',
+        edit_block: 'Edit Blocks',
+        idle_start: 'Idle Periods',
+        idle_end: 'Idle Periods',
+        debug_start: 'Debug Sessions',
+        debug_end: 'Debug Sessions',
+        terminal_open: 'Terminal',
+        session_start: 'Session',
+        session_end: 'Session',
+      };
+
+      const groups = {};
+      for (const event of events) {
+        const label = typeLabels[event.type] || 'Other';
+        if (!groups[label]) groups[label] = [];
+        groups[label].push(event);
+      }
+
+      // Order: Notes first, then Commits, then the rest
+      const order = ['Notes', 'Commits', 'Edit Blocks', 'Debug Sessions', 'Idle Periods', 'Terminal', 'Session'];
+      for (const label of order) {
+        if (!groups[label] || groups[label].length === 0) continue;
+        const header = document.createElement('li');
+        header.className = 'group-header';
+        header.textContent = label + ' (' + groups[label].length + ')';
+        timeline.appendChild(header);
+
+        for (const event of groups[label]) {
+          const el = renderEvent(event);
+          if (el) timeline.appendChild(el);
+        }
+      }
+    }
+
+    function renderByFile(allEvents) {
+      const editBlocks = allEvents.filter(e => e.type === 'edit_block');
+      const commits = allEvents.filter(e => e.type === 'git_commit');
+
+      if (editBlocks.length === 0 && commits.length === 0) {
+        timeline.innerHTML = '<li class="empty">No file activity yet.</li>';
+        return;
+      }
+
+      // Group edit blocks by file
+      const fileGroups = {};
+      for (const event of editBlocks) {
+        const file = shortenPath(event.data.filePath || 'unknown');
+        if (!fileGroups[file]) fileGroups[file] = { edits: [], totalMin: 0, totalSaves: 0 };
+        fileGroups[file].edits.push(event);
+        fileGroups[file].totalMin += (event.data.durationMin || 0);
+        fileGroups[file].totalSaves += (event.data.saveCount || 0);
+      }
+
+      // Sort by total time spent descending
+      const sorted = Object.entries(fileGroups).sort((a, b) => b[1].totalMin - a[1].totalMin);
+
+      for (const [file, data] of sorted) {
+        const header = document.createElement('li');
+        header.className = 'group-header';
+        header.textContent = file + ' \u2014 ' + formatMin(data.totalMin) + ' \u00B7 ' + data.totalSaves + ' save' + (data.totalSaves !== 1 ? 's' : '');
+        timeline.appendChild(header);
+
+        for (const event of data.edits) {
+          const el = renderEvent(event);
+          if (el) timeline.appendChild(el);
+        }
+      }
+
+      // Commits at the end
+      if (commits.length > 0) {
+        const header = document.createElement('li');
+        header.className = 'group-header';
+        header.textContent = 'Commits (' + commits.length + ')';
+        timeline.appendChild(header);
+        for (const event of commits) {
+          const el = renderEvent(event);
+          if (el) timeline.appendChild(el);
+        }
+      }
+    }
+
+    function renderNotesOnly(events) {
+      const notes = events.filter(e => e.type === 'note');
+      if (notes.length === 0) {
+        timeline.innerHTML = '<li class="empty">No notes yet. Press Cmd+Shift+J to add one.</li>';
+        return;
+      }
+      for (const event of notes) {
+        const el = renderEvent(event);
+        if (el) timeline.appendChild(el);
+      }
+    }
+
+    function updateHeader(session) {
       const start = new Date(session.startTime);
       const elapsed = formatDuration(start);
       titleEl.textContent = 'Coding Session \u2014 ' + session.workspace;
@@ -198,21 +395,6 @@
       const notes = session.events.filter(e => e.type === 'note').length;
       const branch = session.branch ? ' \u00B7 ' + session.branch : '';
       metaEl.textContent = elapsed + branch + ' \u00B7 ' + commits + ' commit' + (commits !== 1 ? 's' : '') + ' \u00B7 ' + notes + ' note' + (notes !== 1 ? 's' : '');
-
-      // Render new events
-      for (const event of session.events) {
-        if (renderedIds.has(event.id)) continue;
-        renderedIds.add(event.id);
-
-        const el = renderEvent(event);
-        if (el) {
-          if (emptyMsg && emptyMsg.parentNode) {
-            emptyMsg.remove();
-          }
-          timeline.appendChild(el);
-          el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }
-      }
     }
 
     function renderEvent(event) {
@@ -303,6 +485,11 @@
       return li;
     }
 
+    function scrollToBottom() {
+      const last = timeline.lastElementChild;
+      if (last) last.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
     function formatTime(iso) {
       const d = new Date(iso);
       return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
@@ -324,7 +511,7 @@
     }
 
     function shortenPath(p) {
-      const parts = p.replace(/\\\\/g, '/').split('/');
+      const parts = p.replace(/\\/g, '/').split('/');
       if (parts.length <= 2) return p;
       return parts.slice(-2).join('/');
     }
