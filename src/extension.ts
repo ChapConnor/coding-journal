@@ -93,6 +93,11 @@ export function activate(context: vscode.ExtensionContext) {
         await sm.startSession();
       }
     }
+    // Auto-open timeline when session starts
+    const session = sm.getSession();
+    if (session) {
+      timelinePanel.show(session);
+    }
   })();
 
   // React to config changes that affect status bar display
